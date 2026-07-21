@@ -1,11 +1,11 @@
 {
-  "projectId": "evocative-foundation-g46tg",
-  "appId": "1:440457837364:web:ac25097da5b16e33ef8361",
-  "apiKey": "AIzaSyBLXPv4HoRc-qCRnOUK4g7qmyDKhqywQIk",
-  "authDomain": "evocative-foundation-g46tg.firebaseapp.com",
-  "storageBucket": "evocative-foundation-g46tg.firebasestorage.app",
-  "messagingSenderId": "440457837364",
+  "projectId": "baddy-split",
+  "appId": "1:445855861708:web:95a03dcd87e2475a502b69",
+  "apiKey": "AIzaSyDKpRiqe85s9Z2DgGkHcLHxhWjAnvR-RMM",
+  "authDomain": "baddy-split.firebaseapp.com",
+  "storageBucket": "baddy-split.firebasestorage.app",
+  "messagingSenderId": "445855861708",
   "measurementId": "",
-  "oAuthClientId": "440457837364-r9ood7at0f4rgekjvvvqv57l0iu2a015.apps.googleusercontent.com",
+  "oAuthClientId": "",
   "recaptchaSiteKey": ""
 }
