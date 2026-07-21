@@ -3,6 +3,7 @@ import { getFirebaseAuth, provider, signInWithPopup, signOut, GoogleAuthProvider
 import { Player, Quarter, Session } from '../types';
 import { Cloud, CloudCheck, CloudLightning, RefreshCw, LogIn, LogOut, FileSpreadsheet, Download, FolderOpen, Search, X } from 'lucide-react';
 import { getApiUrl } from '../lib/api';
+import { syncToGoogleSheets, importFromGoogleSheets } from '../lib/googleSheetsService';
 
 interface SheetsSyncProps {
   quarters: Quarter[];
@@ -125,32 +126,16 @@ export default function SheetsSync({
         }
       });
 
-      const payload: any = {
+      await syncToGoogleSheets({
+        token: activeToken,
+        spreadsheetId: targetSpreadsheetId,
+        syncQuarterId: selectedQuarterId ? Number(selectedQuarterId) : undefined,
         quarters,
         players: filteredPlayers,
-        sessions,
-        spreadsheetId: targetSpreadsheetId
-      };
-
-      if (selectedQuarterId) {
-        payload.syncQuarterId = Number(selectedQuarterId);
-      }
-
-      const response = await fetch(getApiUrl('/api/sheets/sync'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${activeToken}`
-        },
-        body: JSON.stringify(payload)
+        sessions
       });
 
-      const data = await response.json();
-      if (response.ok) {
-        setSyncStatus({ text: `Synced with Google Sheets (${category === 'Kid' ? 'Kids' : 'Adults'}) successfully!`, type: 'success' });
-      } else {
-        setSyncStatus({ text: `Sync failed: ${data.error || 'Unknown error'}`, type: 'error' });
-      }
+      setSyncStatus({ text: `Synced with Google Sheets (${category === 'Kid' ? 'Kids' : 'Adults'}) successfully!`, type: 'success' });
     } catch (err: any) {
       console.error('Sync error:', err);
       setSyncStatus({ text: `Sync error: ${err.message || 'Failed to connect'}`, type: 'error' });
@@ -208,41 +193,24 @@ export default function SheetsSync({
 
     try {
       setImportStatus({ text: 'Connecting to Google Sheets and parsing entries...', type: 'loading' });
-      const response = await fetch(getApiUrl('/api/sheets/import'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          spreadsheetId: importSpreadsheetId,
-          sheetName: importSheetName,
-          quarterId: Number(importQuarterId),
-          players: players.filter(p => {
-            if (category === 'Kid') {
-              return p.category === 'Kid';
-            } else {
-              return p.category === 'Adult' || !p.category;
-            }
-          }),
-          category
-        })
+      const res = await importFromGoogleSheets({
+        token,
+        spreadsheetId: importSpreadsheetId,
+        sheetName: importSheetName,
+        quarterId: Number(importQuarterId),
+        players,
+        category
       });
 
-      const data = await response.json();
-      if (response.ok) {
-        onImportSessions(data.sessions);
-        setImportStatus({
-          text: `Successfully imported ${data.sessions.length} sessions into selected quarter!`,
-          type: 'success'
-        });
-        setTimeout(() => {
-          setShowImport(false);
-          setImportStatus({ text: '', type: 'idle' });
-        }, 3000);
-      } else {
-        setImportStatus({ text: `Import failed: ${data.error || 'Unknown error'}`, type: 'error' });
-      }
+      onImportSessions(res.sessions);
+      setImportStatus({
+        text: `Successfully imported ${res.sessions.length} sessions into selected quarter!`,
+        type: 'success'
+      });
+      setTimeout(() => {
+        setShowImport(false);
+        setImportStatus({ text: '', type: 'idle' });
+      }, 3000);
     } catch (err: any) {
       console.error('Import error:', err);
       setImportStatus({ text: `Import error: ${err.message || 'Failed to connect'}`, type: 'error' });
