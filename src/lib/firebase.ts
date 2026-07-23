@@ -14,27 +14,14 @@ export async function getFirebaseAuth() {
   if (authInstance) return authInstance;
 
   try {
-    // Try to use the compiled-in config first for instant initialization and offline compatibility
+    // Use compiled-in config for initialization and offline/static hosting compatibility
     if (localFirebaseConfig && localFirebaseConfig.apiKey) {
       const app = initializeApp(localFirebaseConfig);
       authInstance = getAuth(app);
       return authInstance;
     }
 
-    // Fallback to fetching from server if the compile-time config is somehow empty
-    const res = await fetch(getApiUrl('/api/config/firebase'));
-    if (!res.ok) {
-      throw new Error(`Failed to fetch Firebase config: ${res.statusText}`);
-    }
-    const config: FirebaseConfig = await res.json();
-    
-    if (!config || !config.apiKey) {
-      throw new Error("Invalid or missing Firebase configuration on server");
-    }
-
-    const app = initializeApp(config);
-    authInstance = getAuth(app);
-    return authInstance;
+    throw new Error("Missing Firebase configuration");
   } catch (error) {
     console.error("Firebase auth initialization failed:", error);
     return null;

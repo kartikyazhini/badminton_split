@@ -863,3 +863,314 @@ export async function importFromGoogleSheets(params: {
 
   return { success: true, sessions: parsedSessions };
 }
+
+export async function loadFromGoogleSheets(params: {
+  token: string;
+  category: 'Adult' | 'Kid';
+  players: Player[];
+}): Promise<{ quarters: Quarter[]; sessions: Session[] }> {
+  const { token, category, players: rawPlayers = [] } = params;
+  const players = rawPlayers.filter((p: any) => {
+    if (category === "Kid") {
+      return p.category === "Kid";
+    } else {
+      return p.category === "Adult" || !p.category;
+    }
+  });
+
+  const spreadsheetId = category === "Kid" 
+    ? "1cj02RjtHirJs5GELGQuM6kjBiMXfQ_1uK6pV-9OUyp8" 
+    : "1YHzJuRgjUFCUqFuibXpb-ZiYIAyuXyZK2Wx_QDeTr9I";
+
+  const authHeader = { Authorization: `Bearer ${token}` };
+
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets(properties(sheetId%2Ctitle))`, {
+    headers: authHeader
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Failed to fetch spreadsheet details (${res.status}): ${errText}`);
+  }
+
+  const data = await res.json();
+  const sheetTabs = data.sheets || [];
+
+  const parsedQuarters: Quarter[] = [];
+  const parsedSessions: Session[] = [];
+  let sessionCounter = 1;
+
+  for (let idx = 0; idx < sheetTabs.length; idx++) {
+    const sheet = sheetTabs[idx];
+    const title = sheet.properties?.title;
+    if (!title) continue;
+
+    const tLower = title.toLowerCase();
+    if (tLower.includes("template") || tLower.includes("readme") || tLower.includes("sheet1")) {
+      continue;
+    }
+
+    const quarterId = idx + 1;
+
+    let startDate = "2026-01-01";
+    let endDate = "2026-03-31";
+
+    if (tLower.includes("q2") || tLower.includes("quarter 2") || tLower.includes("apr") || tLower.includes("june")) {
+      startDate = "2026-04-01";
+      endDate = "2026-06-30";
+    } else if (tLower.includes("q3") || tLower.includes("quarter 3") || tLower.includes("jul") || tLower.includes("sep")) {
+      startDate = "2026-07-01";
+      endDate = "2026-09-30";
+    } else if (tLower.includes("q4") || tLower.includes("quarter 4") || tLower.includes("oct") || tLower.includes("dec")) {
+      startDate = "2026-10-01";
+      endDate = "2026-12-31";
+    }
+
+    parsedQuarters.push({
+      id: quarterId,
+      name: title,
+      startDate,
+      endDate
+    });
+
+    try {
+      const rangeRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'${encodeURIComponent(title)}'!A1:Z100`, {
+        headers: authHeader
+      });
+
+      if (!rangeRes.ok) continue;
+
+      const rangeData = await rangeRes.json();
+      const values = rangeData.values;
+      if (!values || values.length === 0) continue;
+
+      const headers = values[0];
+      const rows = values.slice(1);
+
+      const dateIdx = headers.findIndex((h: any) => {
+        const lower = String(h || "").toLowerCase();
+        return lower.includes("date") || lower.includes("dt") || lower.includes("day");
+      });
+      const typeIdx = headers.findIndex((h: any) => {
+        const lower = String(h || "").toLowerCase();
+        return lower.includes("type") || lower.includes("description") || lower.includes("item") || lower.includes("particulars");
+      });
+      const feeIdx = headers.findIndex((h: any) => {
+        const lower = String(h || "").toLowerCase();
+        return lower.includes("total") || lower.includes("fee") || lower.includes("amount") || lower.includes("price") || lower.includes("cost");
+      });
+      const paidByIdx = headers.findIndex((h: any) => {
+        const lower = String(h || "").toLowerCase();
+        return lower.includes("paid") || lower.includes("payer") || lower.includes("buyer");
+      });
+      const attendeesCountIdx = headers.findIndex((h: any) => {
+        const lower = String(h || "").toLowerCase();
+        return lower.includes("attendee") || lower.includes("count") || lower.includes("no. of players") || lower.includes("pax") || lower.includes("head count");
+      });
+      const commentIdx = headers.findIndex((h: any) => {
+        const lower = String(h || "").toLowerCase();
+        return lower.includes("comment") || lower.includes("note") || lower.includes("remark") || lower.includes("comments");
+      });
+
+      const playerCols: { colIdx: number; name: string; playerIds: number[]; type: 'individual' | 'family' }[] = [];
+
+      headers.forEach((headerName: string, hIdx: number) => {
+        const hLower = String(headerName || "").trim().toLowerCase();
+        if (!hLower) return;
+
+        if (hIdx === dateIdx || hIdx === typeIdx || hIdx === feeIdx || hIdx === paidByIdx || hIdx === attendeesCountIdx || hIdx === commentIdx) {
+          return;
+        }
+        if (hLower.includes("cost / person") || hLower.includes("total paid") || hLower.includes("to pay") || hLower.includes("total cost") || hLower.includes("receive") || hLower.includes("s no") || hLower.includes("total")) {
+          return;
+        }
+
+        const matchingFamilyPlayers = players.filter((p: any) => p.family && p.family.trim().toLowerCase() === hLower);
+        if (matchingFamilyPlayers.length > 0) {
+          playerCols.push({
+            colIdx: hIdx,
+            name: headerName,
+            playerIds: matchingFamilyPlayers.map((p: any) => p.id),
+            type: 'family'
+          });
+          return;
+        }
+
+        const matchingPlayer = players.find((p: any) => p.name && isPlayerMatch(p.name, hLower));
+        if (matchingPlayer) {
+          playerCols.push({
+            colIdx: hIdx,
+            name: headerName,
+            playerIds: [matchingPlayer.id],
+            type: 'individual'
+          });
+          return;
+        }
+
+        if (hLower.includes("/")) {
+          const parts = hLower.split("/");
+          const ids: number[] = [];
+          parts.forEach((part) => {
+            const cleanPart = part.trim().toLowerCase();
+            const p = players.find((player: any) => isPlayerMatch(player.name, cleanPart));
+            if (p) {
+              ids.push(p.id);
+            }
+          });
+          if (ids.length > 0) {
+            playerCols.push({
+              colIdx: hIdx,
+              name: headerName,
+              playerIds: ids,
+              type: 'family'
+            });
+            return;
+          }
+        }
+
+        const foundSubPlayers = players.filter((p: any) => searchStrContainsPlayer(hLower, p.name) || searchStrContainsPlayer(p.name, hLower));
+        if (foundSubPlayers.length > 0) {
+          playerCols.push({
+            colIdx: hIdx,
+            name: headerName,
+            playerIds: foundSubPlayers.map((p: any) => p.id),
+            type: foundSubPlayers.length > 1 ? 'family' : 'individual'
+          });
+        }
+      });
+
+      playerCols.forEach((col) => {
+        const hasFamily = col.playerIds.some((pId) => {
+          const p = players.find((pl: any) => pl.id === pId);
+          return p && p.family && p.family.trim();
+        });
+
+        if (hasFamily) {
+          col.type = 'family';
+          const expandedIds = [...col.playerIds];
+          col.playerIds.forEach((pId) => {
+            const p = players.find((pl: any) => pl.id === pId);
+            if (p && p.family && p.family.trim()) {
+              const famLower = p.family.trim().toLowerCase();
+              players.forEach((otherP: any) => {
+                if (otherP.family && otherP.family.trim().toLowerCase() === famLower) {
+                  if (!expandedIds.includes(otherP.id)) {
+                    expandedIds.push(otherP.id);
+                  }
+                }
+              });
+            }
+          });
+          col.playerIds = expandedIds;
+        }
+      });
+
+      for (const row of rows) {
+        if (row.length === 0) continue;
+
+        const rawDate = dateIdx !== -1 ? String(row[dateIdx] || "").trim() : "";
+        if (!rawDate) continue;
+
+        const lowerDate = rawDate.toLowerCase();
+        if (lowerDate.includes("total") || lowerDate.includes("to pay") || lowerDate.includes("balance") || lowerDate.includes("cost")) {
+          continue;
+        }
+
+        const formattedDate = parseDateToYYYYMMDD(rawDate);
+        const expenseType = typeIdx !== -1 ? String(row[typeIdx] || "").trim() || "Court Rental" : "Court Rental";
+
+        let courtFee = 0;
+        if (feeIdx !== -1) {
+          const feeStr = String(row[feeIdx] || "").replace(/[^0-9.]/g, "");
+          courtFee = parseFloat(feeStr) || 0;
+        }
+
+        const rawComment = commentIdx !== -1 ? String(row[commentIdx] || "").trim() : "";
+        const attendeeIds: number[] = [];
+
+        const playersInComment = players.filter((p: any) => p && p.name && searchStrContainsPlayer(rawComment, p.name));
+
+        if (playersInComment.length > 0) {
+          playersInComment.forEach((p: any) => {
+            if (!attendeeIds.includes(p.id)) {
+              attendeeIds.push(p.id);
+            }
+          });
+        } else {
+          playerCols.forEach((col) => {
+            if (col.colIdx >= row.length) return;
+            const val = String(row[col.colIdx] || "").trim();
+            if (val && val !== "0" && val !== "0.00" && val !== "-") {
+              const validColPlayerIds = col.playerIds.filter((pId) => players.some((pl: any) => pl.id === pId));
+              if (col.type === 'individual') {
+                validColPlayerIds.forEach((pId) => {
+                  if (!attendeeIds.includes(pId)) attendeeIds.push(pId);
+                });
+              } else {
+                let count = 1;
+                if (attendeesCountIdx !== -1 && row[attendeesCountIdx]) {
+                  const totalAttCount = parseInt(row[attendeesCountIdx]) || 1;
+                  const costPerPerson = courtFee / totalAttCount;
+                  const cellVal = parseFloat(val.replace(/[^0-9.]/g, "")) || 0;
+                  if (costPerPerson > 0 && cellVal > 0) {
+                    count = Math.round(cellVal / costPerPerson);
+                    if (count < 1) count = 1;
+                  }
+                }
+                const toAdd = validColPlayerIds.slice(0, count);
+                toAdd.forEach((pId) => {
+                  if (!attendeeIds.includes(pId)) attendeeIds.push(pId);
+                });
+              }
+            }
+          });
+        }
+
+        const paidByStr = paidByIdx !== -1 ? String(row[paidByIdx] || "").trim() : "";
+        let paidById: number | null = null;
+        if (paidByStr) {
+          const pMatch = players.find((p: any) => isPlayerMatch(p.name, paidByStr));
+          if (pMatch) {
+            paidById = pMatch.id;
+          } else {
+            const subMatch = players.find((p: any) => searchStrContainsPlayer(paidByStr, p.name) || searchStrContainsPlayer(p.name, paidByStr));
+            if (subMatch) {
+              paidById = subMatch.id;
+            }
+          }
+        }
+
+        if (paidById == null || !players.some((p: any) => p.id === paidById)) {
+          if (attendeeIds.length > 0) {
+            paidById = attendeeIds[0];
+          } else if (players.length > 0) {
+            paidById = players[0].id;
+          } else {
+            paidById = 1;
+          }
+        }
+
+        const attendeeNames = attendeeIds
+          .map((id) => players.find((p) => p.id === id)?.name || '')
+          .filter((name) => name !== '')
+          .join(', ');
+
+        parsedSessions.push({
+          id: sessionCounter++,
+          quarterId: Number(quarterId),
+          date: formattedDate,
+          courtFee,
+          attendeeIds,
+          paidById,
+          expenseType,
+          comment: attendeeNames || rawComment
+        });
+      }
+    } catch (e) {
+      console.error(`Error parsing tab ${title}:`, e);
+    }
+  }
+
+  return { quarters: parsedQuarters, sessions: parsedSessions };
+}
+

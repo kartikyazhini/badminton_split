@@ -6,6 +6,7 @@ import PlayerList from './components/PlayerList';
 import QuarterList from './components/QuarterList';
 import SheetsSync from './components/SheetsSync';
 import IOSInstallPrompt from './components/IOSInstallPrompt';
+import { loadFromGoogleSheets, syncToGoogleSheets } from './lib/googleSheetsService';
 import { LayoutGrid, CalendarRange, Users, FolderKanban, Activity, ShieldCheck, RefreshCw } from 'lucide-react';
 
 const SEED_PLAYERS: Player[] = [
@@ -190,24 +191,15 @@ export default function App() {
     setLoadingSheetData(true);
     setLoadError(null);
     try {
-      const res = await fetch('/api/sheets/load', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${activeToken}`
-        },
-        body: JSON.stringify({
-          category: activeCategory,
-          players
-        })
+      const data = await loadFromGoogleSheets({
+        token: activeToken,
+        category: activeCategory,
+        players
       });
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || 'Failed to load sheet data');
-      }
-      const data = await res.json();
-      if (data.quarters && data.sessions) {
+      if (data.quarters && data.quarters.length > 0) {
         setQuarters(data.quarters);
+      }
+      if (data.sessions) {
         setSessions(data.sessions);
       }
     } catch (err: any) {
@@ -234,19 +226,12 @@ export default function App() {
       : '1YHzJuRgjUFCUqFuibXpb-ZiYIAyuXyZK2Wx_QDeTr9I';
 
     try {
-      const payload = {
+      await syncToGoogleSheets({
+        token: activeToken,
+        spreadsheetId,
         quarters: updatedQuarters,
         players,
-        sessions: updatedSessions,
-        spreadsheetId
-      };
-      await fetch('/api/sheets/sync', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${activeToken}`
-        },
-        body: JSON.stringify(payload)
+        sessions: updatedSessions
       });
     } catch (err) {
       console.error('Auto-sync to Google Sheets failed:', err);
