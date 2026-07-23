@@ -173,17 +173,26 @@ export default function App() {
     }
   });
 
-  // Keep selectedQuarterFilter in sync if quarters list changes
+  // Keep selectedQuarterFilter in sync if quarters list, category, or sessions change
   useEffect(() => {
     if (quarters.length > 0) {
       const exists = quarters.some((q) => q.id === selectedQuarterFilter);
-      if (!exists) {
-        setSelectedQuarterFilter(quarters[0].id);
+      const hasSessionsInCurrent = sessions.some((s) => s.quarterId === selectedQuarterFilter);
+
+      if (!exists || !selectedQuarterFilter || (!hasSessionsInCurrent && sessions.some((s) => quarters.some((q) => q.id === s.quarterId)))) {
+        const bestWithSessions = [...quarters].reverse().find((q) =>
+          sessions.some((s) => s.quarterId === q.id)
+        );
+        if (bestWithSessions) {
+          setSelectedQuarterFilter(bestWithSessions.id);
+        } else if (!exists || !selectedQuarterFilter) {
+          setSelectedQuarterFilter(quarters[0].id);
+        }
       }
     } else {
       setSelectedQuarterFilter(0);
     }
-  }, [quarters, selectedQuarterFilter]);
+  }, [quarters, category, sessions]);
 
   // Load from Google Sheets on start or on category switch
   const loadSheetData = async (activeCategory: 'Adult' | 'Kid', activeToken: string | null) => {
@@ -469,7 +478,14 @@ export default function App() {
         {/* Dynamic Tab Views */}
         <div className="pb-4">
           {activeTab === 'dashboard' && (
-            <Dashboard sessions={sessions} quarters={quarters} players={players} />
+            <Dashboard
+              sessions={sessions}
+              quarters={quarters}
+              players={players}
+              category={category}
+              selectedQuarter={selectedQuarterFilter}
+              setSelectedQuarter={setSelectedQuarterFilter}
+            />
           )}
           {activeTab === 'sessions' && (
             <SessionList

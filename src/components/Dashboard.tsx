@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Player, Quarter, Session } from '../types';
 import { DollarSign, Calendar, Users, TrendingUp, RefreshCw, ArrowRight, Wallet, Receipt } from 'lucide-react';
 
@@ -6,18 +6,62 @@ interface DashboardProps {
   sessions: Session[];
   quarters: Quarter[];
   players: Player[];
+  category?: 'Adult' | 'Kid';
+  selectedQuarter?: number;
+  setSelectedQuarter?: (id: number) => void;
 }
 
-export default function Dashboard({ sessions, quarters, players }: DashboardProps) {
-  const [selectedQuarter, setSelectedQuarter] = useState<number>(
-    quarters.length > 0 ? quarters[0].id : 0
-  );
+export default function Dashboard({
+  sessions,
+  quarters,
+  players,
+  category,
+  selectedQuarter: propSelectedQuarter,
+  setSelectedQuarter: propSetSelectedQuarter,
+}: DashboardProps) {
+  const [internalQuarter, setInternalQuarter] = useState<number>(0);
 
-  React.useEffect(() => {
-    if (quarters.length > 0 && !selectedQuarter) {
-      setSelectedQuarter(quarters[0].id);
+  const selectedQuarter = propSelectedQuarter !== undefined ? propSelectedQuarter : internalQuarter;
+
+  const handleQuarterChange = (id: number) => {
+    setInternalQuarter(id);
+    if (propSetSelectedQuarter) {
+      propSetSelectedQuarter(id);
     }
-  }, [quarters]);
+  };
+
+  const prevCategoryRef = useRef(category);
+  const prevSessionsLenRef = useRef(sessions.length);
+
+  useEffect(() => {
+    if (quarters.length === 0) return;
+
+    const categoryChanged = prevCategoryRef.current !== category;
+    prevCategoryRef.current = category;
+
+    const sessionsChanged = prevSessionsLenRef.current !== sessions.length;
+    prevSessionsLenRef.current = sessions.length;
+
+    const isValidQuarter = quarters.some((q) => q.id === selectedQuarter);
+    const qSessionsCount = sessions.filter((s) => s.quarterId === selectedQuarter).length;
+
+    if (
+      categoryChanged ||
+      !isValidQuarter ||
+      !selectedQuarter ||
+      (qSessionsCount === 0 && (sessionsChanged || categoryChanged || !isValidQuarter))
+    ) {
+      const quarterWithSessions = [...quarters].reverse().find((q) =>
+        sessions.some((s) => s.quarterId === q.id)
+      );
+
+      if (quarterWithSessions) {
+        handleQuarterChange(quarterWithSessions.id);
+      } else if (!isValidQuarter || !selectedQuarter) {
+        handleQuarterChange(quarters[0].id);
+      }
+    }
+  }, [category, quarters, sessions, selectedQuarter]);
 
   // Filter sessions for selected quarter
   const qSessions = sessions.filter((s) => s.quarterId === selectedQuarter);
@@ -149,7 +193,7 @@ export default function Dashboard({ sessions, quarters, players }: DashboardProp
           <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Active Quarter</span>
           <select
             value={selectedQuarter}
-            onChange={(e) => setSelectedQuarter(Number(e.target.value))}
+            onChange={(e) => handleQuarterChange(Number(e.target.value))}
             className="px-3 py-1.5 border border-slate-200 rounded-xl text-slate-800 text-xs font-semibold focus:outline-none focus:border-emerald-500 transition cursor-pointer bg-white shadow-sm"
             id="select-d-filter"
           >
